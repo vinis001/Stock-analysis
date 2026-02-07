@@ -7,11 +7,16 @@ from textblob import TextBlob
 
 # 1. Configuration: Sector to Stocks Mapping
 SECTOR_MAP = {
-    "Banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS"],
-    "IT": ["TCS.NS", "INFY.NS", "WIPRO.NS"],
-    "Auto": ["TATAMOTORS.NS", "M&M.NS", "MARUTI.NS"],
-    "Energy": ["RELIANCE.NS", "ONGC.NS", "ADANIGREEN.NS"],
-    "Pharmacy": ["SUNPHARMA.NS", "CIPLA.NS"]
+    "Banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS"],
+    "IT": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
+    "Auto": ["TATAMOTORS.NS", "M&M.NS", "MARUTI.NS", "EICHERMOT.NS", "BAJAJ-AUTO.NS"],
+    "Energy": ["RELIANCE.NS", "ONGC.NS", "ADANIGREEN.NS", "POWERGRID.NS", "BPCL.NS"],
+    "Pharmacy": ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "DIVISLAB.NS", "APOLLOHOSP.NS"],
+    "Metal": ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "COALINDIA.NS"],
+    "Consumer": ["HUL.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TITAN.NS"],
+    "Telecom": ["BHARTIARTL.NS", "IDEA.NS", "INDUSTOWER.NS"],
+    "Real Estate": ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS"],
+    "Cement": ["ULTRACEMCO.NS", "GRASIM.NS", "SHREECEM.NS"]
 }
 
 def get_sentiment(text):
