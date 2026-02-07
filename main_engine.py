@@ -1,89 +1,91 @@
 import feedparser
 import yfinance as yf
-import json
-import os
-from datetime import datetime
+import pandas as pd
 from textblob import TextBlob
+from datetime import datetime
+import os
 
-# 1. Configuration: Sector to Stocks Mapping
+# CONFIGURATION
+RSS_URL = "https://news.google.com/rss/search?q=when:1d+Indian+stock+market+business&hl=en-IN&gl=IN&ceid=IN:en"
+
 SECTOR_MAP = {
-    "Banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "KOTAKBANK.NS", "AXISBANK.NS"],
-    "IT": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS", "TECHM.NS"],
-    "Auto": ["TATAMOTORS.NS", "M&M.NS", "MARUTI.NS", "EICHERMOT.NS", "BAJAJ-AUTO.NS"],
-    "Energy": ["RELIANCE.NS", "ONGC.NS", "ADANIGREEN.NS", "POWERGRID.NS", "BPCL.NS"],
-    "Pharmacy": ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS", "DIVISLAB.NS", "APOLLOHOSP.NS"],
-    "Metal": ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS", "COALINDIA.NS"],
-    "Consumer": ["HUL.NS", "ITC.NS", "NESTLEIND.NS", "BRITANNIA.NS", "TITAN.NS"],
-    "Telecom": ["BHARTIARTL.NS", "IDEA.NS", "INDUSTOWER.NS"],
-    "Real Estate": ["DLF.NS", "GODREJPROP.NS", "OBEROIRLTY.NS"],
-    "Cement": ["ULTRACEMCO.NS", "GRASIM.NS", "SHREECEM.NS"]
+    "Banking": ["HDFCBANK.NS", "ICICIBANK.NS", "SBIN.NS", "AXISBANK.NS"],
+    "IT": ["TCS.NS", "INFY.NS", "WIPRO.NS", "HCLTECH.NS"],
+    "Auto": ["TATAMOTORS.NS", "MARUTI.NS", "M&M.NS"],
+    "Energy": ["RELIANCE.NS", "ONGC.NS", "ADANIGREEN.NS"],
+    "Pharma": ["SUNPHARMA.NS", "CIPLA.NS", "DRREDDY.NS"],
+    "FMCG": ["ITC.NS", "HUL.NS", "NESTLEIND.NS"],
+    "Metal": ["TATASTEEL.NS", "JSWSTEEL.NS", "HINDALCO.NS"]
 }
 
 def get_sentiment(text):
-    analysis = TextBlob(text)
-    if analysis.sentiment.polarity > 0.1: return "Positive"
-    elif analysis.sentiment.polarity < -0.1: return "Negative"
-    return "Neutral"
+    score = TextBlob(text).sentiment.polarity
+    return "Bullish" if score > 0.05 else "Bearish" if score < -0.05 else "Neutral"
 
-def get_stock_prediction(symbol):
+def get_stock_data(symbol):
     try:
-        stock = yf.Ticker(symbol)
-        hist = stock.history(period="5d")
-        if len(hist) < 2: return "Stable", "N/A"
-        
-        last_close = hist['Close'].iloc[-1]
-        prev_close = hist['Close'].iloc[-2]
-        trend = "Upward" if last_close > prev_close else "Downward"
-        return trend, round(last_close, 2)
+        ticker = yf.Ticker(symbol)
+        hist = ticker.history(period="2d")
+        last_price = round(hist['Close'].iloc[-1], 2)
+        change = round(((hist['Close'].iloc[-1] - hist['Close'].iloc[0]) / hist['Close'].iloc[0]) * 100, 2)
+        trend = "📈 Up" if change > 0 else "📉 Down"
+        return last_price, trend
     except:
-        return "Unknown", "N/A"
+        return "N/A", "Stable"
 
-def run_pipeline():
-    print("📡 Fetching Live Indian Business News...")
-    rss_url = "https://news.google.com/rss/search?q=when:1d+Indian+stock+market+business&hl=en-IN&gl=IN&ceid=IN:en"
-    feed = feedparser.parse(rss_url)
+def generate_report():
+    feed = feedparser.parse(RSS_URL)
+    entries = feed.entries[:20]
     
-    report_data = []
-    
-    for entry in feed.entries[:10]: # Analyze top 10 news items
-        title = entry.title
-        sentiment = get_sentiment(title)
-        
-        # Identify Sector
-        detected_sector = "General"
-        for sector in SECTOR_MAP:
-            if sector.lower() in title.lower():
-                detected_sector = sector
-                break
-        
-        # Get Stock Recommendations
-        recommendations = []
-        stocks_to_check = SECTOR_MAP.get(detected_sector, ["^NSEI"]) # Default to Nifty 50
-        for s in stocks_to_check:
-            trend, price = get_stock_prediction(s)
-            recommendations.append({"ticker": s, "trend": trend, "price": price})
-        
-        report_data.append({
-            "headline": title,
-            "sentiment": sentiment,
-            "sector": detected_sector,
-            "stocks": recommendations,
-            "timeframe": "Intraday/Short-term"
-        })
+    sector_hits = {}
+    analysis_results = []
 
-    # Save Markdown Report
-    os.makedirs('reports', exist_ok=True)
-    filename = f"reports/Analysis_{datetime.now().strftime('%Y-%m-%d')}.md"
-    with open(filename, 'w') as f:
-        f.write(f"# 📈 Indian Market Prediction: {datetime.now().strftime('%d %b %Y')}\n\n")
-        for item in report_data:
-            f.write(f"### 📰 {item['headline']}\n")
-            f.write(f"- **Sector:** {item['sector']} | **Sentiment:** {item['sentiment']}\n")
-            for s in item['stocks']:
-                f.write(f"  - 🏷️ `{s['ticker']}`: {s['trend']} (Last: ₹{s['price']})\n")
-            f.write("\n---\n")
+    for entry in entries:
+        headline = entry.title
+        sentiment = get_sentiment(headline)
+        
+        for sector, stocks in SECTOR_MAP.items():
+            if sector.lower() in headline.lower() or any(s.split('.')[0].lower() in headline.lower() for s in stocks):
+                sector_hits[sector] = sector_hits.get(sector, 0) + 1
+                
+                # Analyze first stock in that sector for report
+                main_stock = stocks[0]
+                price, trend = get_stock_data(main_stock)
+                
+                analysis_results.append({
+                    "sector": sector,
+                    "headline": headline,
+                    "sentiment": sentiment,
+                    "stock": main_stock,
+                    "price": price,
+                    "trend": trend
+                })
+
+    # SORT SECTORS BY IMPACT
+    top_sectors = sorted(sector_hits.items(), key=lambda x: x[1], reverse=True)[:10]
+
+    # CREATE MARKDOWN FILE (Matching your Image Structure)
+    date_str = datetime.now().strftime("%Y-%m-%d")
+    report_content = f"# Investment Timeliness Sectors - {date_str}\n\n"
     
-    print(f"✅ Report created: {filename}")
+    report_content += "## Top Most Affected Sectors\n"
+    for i, (sec, count) in enumerate(top_sectors, 1):
+        report_content += f"{i}. {sec} ({count} major news items)\n"
+
+    report_content += f"\n### 1. NEWS RSS URL\n- {RSS_URL}\n"
+    
+    report_content += "\n### 2. Sector Map (Logic Used)\n```json\n" + str(SECTOR_MAP).replace("'", '"') + "\n```\n"
+
+    report_content += "\n### 3. Analysis Results\n"
+    for res in analysis_results:
+        report_content += f"#### {res['sector']} | Impact: {res['sentiment']}\n"
+        report_content += f"- **Headline:** {res['headline']}\n"
+        report_content += f"- **Top Pick:** `{res['stock']}` | **Price:** ₹{res['price']} | **Trend:** {res['trend']}\n\n"
+
+    os.makedirs("reports", exist_ok=True)
+    with open(f"reports/Report_{date_str}.md", "w", encoding="utf-8") as f:
+        f.write(report_content)
+    print(f"✅ Report generated for {date_str}")
 
 if __name__ == "__main__":
-    run_pipeline()
+    generate_report()
