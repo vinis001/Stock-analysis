@@ -1,5 +1,6 @@
+requests
+pandas
 feedparser
 yfinance
-pandas
 textblob
-lxml
+python-pptx
