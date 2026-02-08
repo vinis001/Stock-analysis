@@ -1,120 +1,78 @@
 import pandas as pd
 import feedparser
 import yfinance as yf
-import os
-import smtplib
 import re
 import requests
 import io
 from datetime import datetime
 from textblob import TextBlob
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+from pptx import Presentation
+from pptx.util import Inches, Pt
 
-# --- CONFIGURATION ---
 def get_stock_universe():
-    """Fetch the official Nifty 500 list from NiftyIndices/NSE."""
-    # Official URL for the Nifty 500 constituents
     url = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
-    
-    # We must use headers, otherwise the website blocks the request!
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    
+    headers = {'User-Agent': 'Mozilla/5.0'}
     try:
         response = requests.get(url, headers=headers, timeout=15)
-        response.raise_for_status() # Check for 404 or other errors
-        
-        # Load the CSV content into a DataFrame
         df = pd.read_csv(io.StringIO(response.text))
-        
-        stock_dict = {}
-        for _, row in df.iterrows():
-            # Standardize name for better matching (removing 'Ltd', 'Bank' etc.)
-            clean_name = re.sub(r' (Ltd|Limited|Bank|Finance|Industries|Services|Corp|Enterprises)', '', row['Company Name'], flags=re.I).strip()
-            ticker = row['Symbol'] + ".NS"
-            stock_dict[clean_name] = ticker
-            stock_dict[row['Symbol']] = ticker # Also map the symbol itself
-            
-        print(f"✅ Successfully loaded {len(df)} stocks from Nifty 500.")
+        stock_dict = {re.sub(r' (Ltd|Limited|Bank|Finance|Industries|Services)', '', row['Company Name'], flags=re.I).strip(): row['Symbol'] + ".NS" for _, row in df.iterrows()}
         return stock_dict
-
-    except Exception as e:
-        print(f"⚠️ Error fetching Nifty 500: {e}. Using critical fallback list.")
-        # Fallback if NSE is down or URL changes
-        return {"Reliance": "RELIANCE.NS", "TCS": "TCS.NS", "HDFC": "HDFCBANK.NS", "Infosys": "INFY.NS", "ICICI": "ICICIBANK.NS"}
-
-def get_stock_metrics(symbol):
-    try:
-        stock = yf.Ticker(symbol)
-        hist = stock.history(period="2d")
-        if len(hist) < 2: return "Stable", 0, 0
-        change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
-        trend = "🚀 Bullish" if change > 0.5 else "🔻 Bearish" if change < -0.5 else "➖ Neutral"
-        return trend, round(hist['Close'].iloc[-1], 2), round(change, 2)
     except:
-        return "N/A", 0, 0
+        return {"Reliance": "RELIANCE.NS", "TCS": "TCS.NS"}
 
-def send_self_email(subject, body):
-    my_email = os.environ.get('EMAIL_ADDRESS')
-    my_password = os.environ.get('EMAIL_PASSWORD')
+def create_ppt_report(found_data):
+    prs = Presentation()
+    date_str = datetime.now().strftime("%d %b %Y")
     
-    if not my_email or not my_password:
-        print("❌ Error: Secrets 'EMAIL_ADDRESS' or 'EMAIL_PASSWORD' not set in GitHub.")
-        return
+    # Title Slide
+    slide = prs.slides.add_slide(prs.slide_layouts[0])
+    slide.shapes.title.text = "Daily Market Analysis"
+    slide.placeholders[1].text = f"Generated on: {date_str}\nAutomated by Gemini Bot"
 
-    msg = MIMEMultipart()
-    msg['From'] = my_email
-    msg['To'] = my_email # SEND TO SELF
-    msg['Subject'] = subject
-    msg.attach(MIMEText(body, 'plain'))
+    # Data Slides
+    for ticker, d in found_data.items():
+        slide = prs.slides.add_slide(prs.slide_layouts[1])
+        slide.shapes.title.text = f"{d['name']} ({ticker})"
+        
+        content = slide.placeholders[1].text_frame
+        content.text = f"Market Trend: {d['trend']}"
+        
+        p = content.add_paragraph()
+        p.text = f"Current Price: ₹{d['price']} ({d['change']}%)"
+        
+        p = content.add_paragraph()
+        p.text = f"Sentiment: {d['sent']}"
+        
+        p = content.add_paragraph()
+        p.text = f"\nLatest News:\n{d['headline']}"
 
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587)
-        server.starttls()
-        server.login(my_email, my_password)
-        server.send_message(msg)
-        server.quit()
-        print(f"📧 Report sent to {my_email}")
-    except Exception as e:
-        print(f"❌ Email failed: {e}")
+    filename = f"Market_Report_{datetime.now().strftime('%Y%m%d')}.pptx"
+    prs.save(filename)
+    print(f"✅ PPT created: {filename}")
+    return filename
 
 def run_analysis():
     stocks = get_stock_universe()
-    # Google News RSS for Indian Business News
     rss_url = "https://news.google.com/rss/search?q=when:1d+Indian+stock+market&hl=en-IN&gl=IN&ceid=IN:en"
     feed = feedparser.parse(rss_url)
-    
     found_data = {}
-    for entry in feed.entries[:35]:
+
+    for entry in feed.entries[:25]:
         headline = entry.title
-        sentiment_val = TextBlob(headline).sentiment.polarity
-        sentiment = "Positive" if sentiment_val > 0.1 else "Negative" if sentiment_val < -0.1 else "Neutral"
-        
         for name, ticker in stocks.items():
-            # Check if stock name appears as a full word in the headline
             if len(name) > 3 and re.search(r'\b' + re.escape(name) + r'\b', headline, re.I):
                 if ticker not in found_data:
-                    trend, price, change = get_stock_metrics(ticker)
+                    stock = yf.Ticker(ticker)
+                    hist = stock.history(period="2d")
+                    change = round(((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100, 2)
                     found_data[ticker] = {
-                        "name": name, "headline": headline, "sent": sentiment,
-                        "trend": trend, "price": price, "change": change
+                        "name": name, "headline": headline, 
+                        "sent": "Positive" if TextBlob(headline).sentiment.polarity > 0.1 else "Neutral",
+                        "trend": "🚀 Bullish" if change > 0 else "🔻 Bearish",
+                        "price": round(hist['Close'].iloc[-1], 2), "change": change
                     }
-
-    date_str = datetime.now().strftime("%d %b %Y")
-    report = f"📬 PERSONAL MARKET SCAN: {date_str}\n" + "="*40 + "\n\n"
     
-    if not found_data:
-        report += "No major Nifty 500 stocks detected in today's news headlines."
-    else:
-        for ticker, d in found_data.items():
-            report += f"🔹 {d['name']} ({ticker})\n"
-            report += f"   Live: ₹{d['price']} ({d['change']}% {d['trend']})\n"
-            report += f"   News: {d['headline']}\n"
-            report += f"   Sentiment: {d['sent']}\n" + "-"*30 + "\n"
-
-    send_self_email(f"Market Report: {date_str}", report)
+    create_ppt_report(found_data)
 
 if __name__ == "__main__":
     run_analysis()
