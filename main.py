@@ -4,109 +4,117 @@ import yfinance as yf
 import os
 import smtplib
 import re
+import requests
+import io
 from datetime import datetime
 from textblob import TextBlob
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from collections import defaultdict
 
-# --- STEP 1: LOAD A WIDE LIST OF STOCKS (NIFTY 500) ---
-def get_nifty_500():
+# --- CONFIGURATION ---
+def get_stock_universe():
+    """Fetch the official Nifty 500 list from NiftyIndices/NSE."""
+    # Official URL for the Nifty 500 constituents
+    url = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
+    
+    # We must use headers, otherwise the website blocks the request!
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    
     try:
-        # Fetching Nifty 500 list from a reliable source
-        url = "https://raw.githubusercontent.com/senthilthyagarajan/nifty-indices-components/master/nifty500.csv"
-        df = pd.read_csv(url)
-        # Create a dictionary of {Company Name: Ticker}
-        # We clean the names to make matching easier (e.g., removing 'Ltd', 'Limited')
+        response = requests.get(url, headers=headers, timeout=15)
+        response.raise_for_status() # Check for 404 or other errors
+        
+        # Load the CSV content into a DataFrame
+        df = pd.read_csv(io.StringIO(response.text))
+        
         stock_dict = {}
         for _, row in df.iterrows():
-            clean_name = re.sub(r' (Ltd|Limited|Industries|Bank|Finance|Services|Corporation)', '', row['Company Name'], flags=re.I).strip()
-            stock_dict[clean_name] = row['Symbol'] + ".NS"
-            stock_dict[row['Symbol']] = row['Symbol'] + ".NS" # Also match the symbol itself
+            # Standardize name for better matching (removing 'Ltd', 'Bank' etc.)
+            clean_name = re.sub(r' (Ltd|Limited|Bank|Finance|Industries|Services|Corp|Enterprises)', '', row['Company Name'], flags=re.I).strip()
+            ticker = row['Symbol'] + ".NS"
+            stock_dict[clean_name] = ticker
+            stock_dict[row['Symbol']] = ticker # Also map the symbol itself
+            
+        print(f"✅ Successfully loaded {len(df)} stocks from Nifty 500.")
         return stock_dict
+
     except Exception as e:
-        print(f"⚠️ Failed to fetch Nifty 500: {e}")
-        return {"Reliance": "RELIANCE.NS", "TCS": "TCS.NS"}
+        print(f"⚠️ Error fetching Nifty 500: {e}. Using critical fallback list.")
+        # Fallback if NSE is down or URL changes
+        return {"Reliance": "RELIANCE.NS", "TCS": "TCS.NS", "HDFC": "HDFCBANK.NS", "Infosys": "INFY.NS", "ICICI": "ICICIBANK.NS"}
 
-# --- STEP 2: EXTRACT STOCKS FROM TEXT ---
-def extract_stocks_from_news(headline, stock_dict):
-    found_tickers = []
-    # Tokenize headline and check against our 500+ stock names
-    for name, ticker in stock_dict.items():
-        if len(name) > 3: # Avoid matching very short words
-            if re.search(r'\b' + re.escape(name) + r'\b', headline, re.I):
-                found_tickers.append((name, ticker))
-    return list(set(found_tickers)) # Remove duplicates
-
-# --- STEP 3: MARKET ANALYSIS LOGIC ---
 def get_stock_metrics(symbol):
     try:
         stock = yf.Ticker(symbol)
         hist = stock.history(period="2d")
-        if len(hist) < 2: return "Stable", 0
+        if len(hist) < 2: return "Stable", 0, 0
         change = ((hist['Close'].iloc[-1] - hist['Close'].iloc[-2]) / hist['Close'].iloc[-2]) * 100
         trend = "🚀 Bullish" if change > 0.5 else "🔻 Bearish" if change < -0.5 else "➖ Neutral"
         return trend, round(hist['Close'].iloc[-1], 2), round(change, 2)
     except:
         return "N/A", 0, 0
 
-def send_email(subject, body):
-    sender = os.environ.get('EMAIL_ADDRESS')
-    password = os.environ.get('EMAIL_PASSWORD')
-    receiver = os.environ.get('RECEIVER_EMAIL')
-    if not all([sender, password, receiver]): return
-    msg = MIMEMultipart(); msg['From'], msg['To'], msg['Subject'] = sender, receiver, subject
-    msg.attach(MIMEText(body, 'plain'))
-    try:
-        server = smtplib.SMTP('smtp.gmail.com', 587); server.starttls()
-        server.login(sender, password); server.send_message(msg); server.quit()
-        print("📧 Email Sent!")
-    except Exception as e: print(f"Email Error: {e}")
+def send_self_email(subject, body):
+    my_email = os.environ.get('EMAIL_ADDRESS')
+    my_password = os.environ.get('EMAIL_PASSWORD')
+    
+    if not my_email or not my_password:
+        print("❌ Error: Secrets 'EMAIL_ADDRESS' or 'EMAIL_PASSWORD' not set in GitHub.")
+        return
 
-# --- MAIN EXECUTION ---
+    msg = MIMEMultipart()
+    msg['From'] = my_email
+    msg['To'] = my_email # SEND TO SELF
+    msg['Subject'] = subject
+    msg.attach(MIMEText(body, 'plain'))
+
+    try:
+        server = smtplib.SMTP('smtp.gmail.com', 587)
+        server.starttls()
+        server.login(my_email, my_password)
+        server.send_message(msg)
+        server.quit()
+        print(f"📧 Report sent to {my_email}")
+    except Exception as e:
+        print(f"❌ Email failed: {e}")
+
 def run_analysis():
-    stock_dict = get_nifty_500()
-    rss_url = "https://news.google.com/rss/search?q=when:1d+Indian+stock+market+business&hl=en-IN&gl=IN&ceid=IN:en"
+    stocks = get_stock_universe()
+    # Google News RSS for Indian Business News
+    rss_url = "https://news.google.com/rss/search?q=when:1d+Indian+stock+market&hl=en-IN&gl=IN&ceid=IN:en"
     feed = feedparser.parse(rss_url)
     
-    analyzed_stocks = {} # Store analysis for stocks found in news
-
-    print(f"🔍 Scanning {len(feed.entries)} headlines for {len(stock_dict)} stocks...")
-
-    for entry in feed.entries[:40]: # Scan top 40 news items
+    found_data = {}
+    for entry in feed.entries[:35]:
         headline = entry.title
-        found = extract_stocks_from_news(headline, stock_dict)
+        sentiment_val = TextBlob(headline).sentiment.polarity
+        sentiment = "Positive" if sentiment_val > 0.1 else "Negative" if sentiment_val < -0.1 else "Neutral"
         
-        sentiment_score = TextBlob(headline).sentiment.polarity
-        sentiment = "Positive" if sentiment_score > 0.1 else "Negative" if sentiment_score < -0.1 else "Neutral"
+        for name, ticker in stocks.items():
+            # Check if stock name appears as a full word in the headline
+            if len(name) > 3 and re.search(r'\b' + re.escape(name) + r'\b', headline, re.I):
+                if ticker not in found_data:
+                    trend, price, change = get_stock_metrics(ticker)
+                    found_data[ticker] = {
+                        "name": name, "headline": headline, "sent": sentiment,
+                        "trend": trend, "price": price, "change": change
+                    }
 
-        for name, ticker in found:
-            if ticker not in analyzed_stocks:
-                trend, price, change = get_stock_metrics(ticker)
-                analyzed_stocks[ticker] = {
-                    "name": name,
-                    "headline": headline,
-                    "sentiment": sentiment,
-                    "trend": trend,
-                    "price": price,
-                    "change": change
-                }
-
-    # Build the report
     date_str = datetime.now().strftime("%d %b %Y")
-    report = f"📰 STOCKS IN THE NEWS: {date_str}\n" + "="*40 + "\n\n"
+    report = f"📬 PERSONAL MARKET SCAN: {date_str}\n" + "="*40 + "\n\n"
     
-    if not analyzed_stocks:
-        report += "No specific Nifty 500 stocks identified in today's top headlines."
+    if not found_data:
+        report += "No major Nifty 500 stocks detected in today's news headlines."
     else:
-        for ticker, data in analyzed_stocks.items():
-            report += f"🏢 STOCK: {data['name']} ({ticker})\n"
-            report += f"🗞️ News: {data['headline']}\n"
-            report += f"🧠 Sentiment: {data['sentiment']}\n"
-            report += f"📊 Trend: {data['trend']} | Price: ₹{data['price']} ({data['change']}%)\n"
-            report += "-"*20 + "\n\n"
+        for ticker, d in found_data.items():
+            report += f"🔹 {d['name']} ({ticker})\n"
+            report += f"   Live: ₹{d['price']} ({d['change']}% {d['trend']})\n"
+            report += f"   News: {d['headline']}\n"
+            report += f"   Sentiment: {d['sent']}\n" + "-"*30 + "\n"
 
-    send_email(f"Daily Stocks-in-News Analysis: {date_str}", report)
+    send_self_email(f"Market Report: {date_str}", report)
 
 if __name__ == "__main__":
     run_analysis()
