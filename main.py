@@ -88,8 +88,16 @@ def run_analysis():
                         break
                     except: continue
 
-    if final_data:
-        create_ppt(final_data)
-
+   if final_data:
+        # Create a dynamic filename based on current date
+        date_str = datetime.now().strftime('%d_%b_%Y')
+        filename = f"Market_Report_{date_str}.pptx"
+        create_ppt(final_data, filename) # Pass filename to function
+def create_ppt(data_list, filename):
+    prs = Presentation()
+    # ... (keep your existing slide logic) ...
+    prs.save(filename)
+    print(f"✅ Saved as {filename}")
+    
 if __name__ == "__main__":
     run_analysis()
