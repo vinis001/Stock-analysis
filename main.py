@@ -20,45 +20,38 @@ def get_stock_universe():
         return pd.DataFrame()
 
 def get_detailed_analysis(sector, change):
-    # Deep-dive sectoral intelligence for 2026
+    # Sectoral Intelligence Dictionary for 2026
     logic = {
         "Financial Services": {
-            "time": "6-12 Months",
-            "upside": "12-15%",
-            "reason": "Credit growth remains robust; NBFCs are seeing cleaner balance sheets and rising retail AUM."
+            "time": "6-12 Months", "upside": "12-15%",
+            "reason": "Strong credit growth and cleaner balance sheets in the NBFC space."
         },
         "Healthcare": {
-            "time": "12-24 Months",
-            "upside": "20%",
-            "reason": "Expansion of digital health infrastructure and high demand for specialized therapies."
+            "time": "12-24 Months", "upside": "20%",
+            "reason": "Shift toward digital healthcare and specialized pharma therapies."
         },
         "Energy": {
-            "time": "3-5 Years",
-            "upside": "25%+",
-            "reason": "Massive shift toward Green Hydrogen; government capex is at an all-time high."
+            "time": "3-5 Years", "upside": "25%+",
+            "reason": "Massive capital rotation into Green Hydrogen and Renewable infrastructure."
         },
         "Capital Goods": {
-            "time": "18-36 Months",
-            "upside": "18%",
-            "reason": "PLI schemes for advanced manufacturing are hitting peak production cycles."
+            "time": "18-36 Months", "upside": "18%",
+            "reason": "Peak manufacturing cycles driven by matured PLI incentive schemes."
         }
     }
-    
-    info = logic.get(sector, {"time": "12 Months", "upside": "10-12%", "reason": "Tracking broader Nifty index recovery and steady earnings."})
+    info = logic.get(sector, {"time": "12 Months", "upside": "10-12%", "reason": "Stable growth tracking Nifty index earnings."})
     sentiment = "Bullish" if change > 0 else "Consolidating"
-    
-    return (f"Outlook: {sentiment}\n"
-            f"Expected Growth: {info['upside']} over {info['time']}\n"
-            f"Why: {info['reason']}")
+    return (f"Sentiment: {sentiment}\nTarget Growth: {info['upside']} | Timeframe: {info['time']}\nContext: {info['reason']}")
 
 def create_ppt(data_list, filename):
     os.makedirs("reports", exist_ok=True)
     filepath = os.path.join("reports", filename)
-    
     prs = Presentation()
+    
+    # Title Slide
     slide = prs.slides.add_slide(prs.slide_layouts[0])
-    slide.shapes.title.text = "Sectoral Growth Intelligence"
-    slide.placeholders[1].text = f"Deep Dive Analysis\n{datetime.now().strftime('%d %b %Y')}"
+    slide.shapes.title.text = "Strategic Sectoral Analysis"
+    slide.placeholders[1].text = f"Growth & Timeframe Forecasts\nGenerated: {datetime.now().strftime('%d %b %Y')}"
 
     for d in data_list:
         slide = prs.slides.add_slide(prs.slide_layouts[1])
@@ -66,28 +59,26 @@ def create_ppt(data_list, filename):
         body = slide.placeholders[1].text_frame
         
         p1 = body.paragraphs[0]
-        p1.text = f"Performance: {d['change']}%"
+        p1.text = f"Current Performance: {d['change']}%"
         p1.font.bold = True
         
         p2 = body.add_paragraph()
-        p2.text = f"\nMarket Context: {d['headline']}"
+        p2.text = f"\nMarket News:\n{d['headline']}"
         p2.font.size = Pt(12)
 
         p3 = body.add_paragraph()
-        p3.text = f"\nGrowth Forecast:\n{d['analysis']}"
+        p3.text = f"\nDeep-Dive Analysis:\n{d['analysis']}"
         p3.font.size = Pt(14)
+        p3.font.bold = True
 
     prs.save(filepath)
     print(f"✅ Saved to {filepath}")
 
 def run_analysis():
-    df = get_stock_universe()
-    # FIX: Initialize final_data at the very start to avoid NameError
+    # FIX: Initialize variable to avoid NameError if no news matches
     final_data = [] 
-    
-    if df.empty: 
-        print("Universe is empty, stopping.")
-        return
+    df = get_stock_universe()
+    if df.empty: return
 
     stock_map = {row['Symbol']: row['Company Name'] for _, row in df.iterrows()}
     sector_map = {row['Symbol']: row.get('Industry', 'General') for _, row in df.iterrows()}
@@ -106,13 +97,9 @@ def run_analysis():
                         s = yf.Ticker(ticker).history(period="2d")
                         if len(s) < 2: continue
                         change = round(((s['Close'].iloc[-1]-s['Close'].iloc[-2])/s['Close'].iloc[-2])*100, 2)
-                        
                         final_data.append({
-                            "name": name, 
-                            "sector": sector_map[sym], 
-                            "headline": headline,
-                            "change": change,
-                            "analysis": get_detailed_analysis(sector_map[sym], change)
+                            "name": name, "sector": sector_map[sym], "headline": headline,
+                            "change": change, "analysis": get_detailed_analysis(sector_map[sym], change)
                         })
                         seen.add(ticker)
                         break
@@ -120,10 +107,10 @@ def run_analysis():
 
     if final_data:
         date_str = datetime.now().strftime('%d_%b_%Y')
-        filename = f"Analysis_{date_str}.pptx"
+        filename = f"Market_DeepDive_{date_str}.pptx"
         create_ppt(final_data, filename)
     else:
-        print("No matching news found for today.")
+        print("No stock news found for deep dive today.")
 
 if __name__ == "__main__":
     run_analysis()
