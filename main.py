@@ -16,7 +16,6 @@ def get_stock_universe():
     try:
         response = requests.get(url, headers=headers, timeout=15)
         df = pd.read_csv(io.StringIO(response.text))
-        # NSE columns are: 'Company Name', 'Symbol', 'Industry'
         return df
     except Exception as e:
         print(f"⚠️ Error fetching universe: {e}")
@@ -29,7 +28,7 @@ def get_impact_summary(change, sentiment, sector):
         return f"The {sector} sector is facing selling pressure. Technicals suggest caution despite current headlines."
     return f"Stable movement in {sector}. Investors are weighing the latest news against broader market trends."
 
-def create_ppt(data_list):
+def create_ppt(data_list, filename):
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[0])
     slide.shapes.title.text = "Market Intelligence Report"
@@ -53,13 +52,14 @@ def create_ppt(data_list):
         p.text = f"\nAnalysis: {d['summary']}"
         p.font.bold = True
 
-    filename = "Market_Report.pptx"
     prs.save(filename)
+    print(f"✅ Saved as {filename}")
     return filename
 
 def run_analysis():
     df = get_stock_universe()
-    if df.empty: return
+    if df.empty: 
+        return
 
     # Use 'Industry' as the key to avoid KeyError
     stock_map = {row['Symbol']: row['Company Name'] for _, row in df.iterrows()}
@@ -70,7 +70,8 @@ def run_analysis():
     seen = set()
 
     for entry in feed.entries[:100]:
-        if len(final_data) >= 15: break
+        if len(final_data) >= 15: 
+            break
         headline = entry.title
         for sym, name in stock_map.items():
             if sym in headline or name.split()[0] in headline:
@@ -78,26 +79,28 @@ def run_analysis():
                 if ticker not in seen:
                     try:
                         s = yf.Ticker(ticker).history(period="2d")
+                        if len(s) < 2: continue
                         change = round(((s['Close'].iloc[-1]-s['Close'].iloc[-2])/s['Close'].iloc[-2])*100, 2)
                         final_data.append({
-                            "name": name, "sector": sector_map[sym], "headline": headline,
-                            "link": entry.link, "change": change, "sent": "Positive" if change > 0 else "Negative",
+                            "name": name, 
+                            "sector": sector_map[sym], 
+                            "headline": headline,
+                            "link": entry.link, 
+                            "change": change, 
+                            "sent": "Positive" if change > 0 else "Negative",
                             "summary": get_impact_summary(change, "Neutral", sector_map[sym])
                         })
                         seen.add(ticker)
                         break
-                    except: continue
+                    except Exception as e:
+                        print(f"Error processing {ticker}: {e}")
+                        continue
 
-   if final_data:
+    if final_data:
         # Create a dynamic filename based on current date
         date_str = datetime.now().strftime('%d_%b_%Y')
         filename = f"Market_Report_{date_str}.pptx"
-        create_ppt(final_data, filename) # Pass filename to function
-def create_ppt(data_list, filename):
-    prs = Presentation()
-    # ... (keep your existing slide logic) ...
-    prs.save(filename)
-    print(f"✅ Saved as {filename}")
-    
+        create_ppt(final_data, filename) 
+
 if __name__ == "__main__":
     run_analysis()
