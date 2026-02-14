@@ -2,14 +2,14 @@ name: Daily Sectoral Deep-Dive
 
 on:
   schedule:
-    - cron: '30 3 * * *'  # Runs at 9:00 AM IST (3:30 AM UTC)
-  workflow_dispatch:      # Allows you to run it manually anytime
+    - cron: '30 3 * * *'  # 9:00 AM IST
+  workflow_dispatch:      # Manual trigger
 
 jobs:
   analyze_and_release:
     runs-on: ubuntu-latest
     permissions:
-      contents: write     # Required to create a Release and upload files
+      contents: write
     
     steps:
       - name: Checkout Code
@@ -21,29 +21,27 @@ jobs:
           python-version: '3.10'
 
       - name: Install Dependencies
-        run: |
-          pip install pandas requests yfinance feedparser textblob python-pptx
+        run: pip install pandas requests yfinance feedparser textblob python-pptx
 
       - name: Run Market Analysis
         id: run_script
         run: |
-          # Run the script and capture the filename generated
           python main.py
-          # We search for the generated .pptx in the reports/ folder
-          FILENAME=$(ls reports/*.pptx | head -n 1)
-          echo "REPORT_PATH=$FILENAME" >> $GITHUB_ENV
-          echo "DATE_TAG=$(date +'%Y-%m-%d-%H%M')" >> $GITHUB_ENV
+          # Store filename for next step
+          FILE_PATH=$(ls reports/*.pptx | head -n 1)
+          echo "REPORT_PATH=$FILE_PATH" >> $GITHUB_ENV
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
+        if: env.REPORT_PATH != ''
         with:
-          tag_name: report-${{ env.DATE_TAG }}
-          name: Market Analysis Report - $(date +'%d %b %Y')
+          # Uses Run ID to make every release unique and avoid retry errors
+          tag_name: report-${{ github.run_id }}
+          name: Market Analysis - $(date +'%d %b %Y')
           files: ${{ env.REPORT_PATH }}
+          make_latest: true
           body: |
-            ### 📈 Daily Sectoral Deep-Dive
-            Your daily market intelligence report is ready.
-            - **No ZIP required**: Download the `.pptx` file directly from the Assets below.
-            - **Focus**: Sectoral growth timeframes and deep-dive logic.
-          draft: false
-          prerelease: false
+            ### 📉 Strategic Market Intelligence
+            Your non-zipped sectoral report is ready for download below.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
