@@ -8,6 +8,17 @@ from datetime import datetime
 from pptx import Presentation
 from pptx.util import Pt
 
+def get_stock_universe():
+    url = "https://www.niftyindices.com/IndexConstituent/ind_nifty500list.csv"
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        response = requests.get(url, headers=headers, timeout=15)
+        df = pd.read_csv(io.StringIO(response.text))
+        return df
+    except Exception as e:
+        print(f"⚠️ Error fetching universe: {e}")
+        return pd.DataFrame()
+
 def get_detailed_analysis(sector, change):
     # Deep-dive sectoral intelligence for 2026
     logic = {
@@ -19,12 +30,12 @@ def get_detailed_analysis(sector, change):
         "Healthcare": {
             "time": "12-24 Months",
             "upside": "20%",
-            "reason": "Expansion of digital health infrastructure and high demand for specialized therapies post-2025."
+            "reason": "Expansion of digital health infrastructure and high demand for specialized therapies."
         },
         "Energy": {
             "time": "3-5 Years",
             "upside": "25%+",
-            "reason": "Massive shift toward Green Hydrogen and ammonia terminals; government capex is at an all-time high."
+            "reason": "Massive shift toward Green Hydrogen; government capex is at an all-time high."
         },
         "Capital Goods": {
             "time": "18-36 Months",
@@ -41,46 +52,78 @@ def get_detailed_analysis(sector, change):
             f"Why: {info['reason']}")
 
 def create_ppt(data_list, filename):
-    # Ensure the folder exists
     os.makedirs("reports", exist_ok=True)
     filepath = os.path.join("reports", filename)
     
     prs = Presentation()
-    # Title Slide
     slide = prs.slides.add_slide(prs.slide_layouts[0])
     slide.shapes.title.text = "Sectoral Growth Intelligence"
     slide.placeholders[1].text = f"Deep Dive Analysis\n{datetime.now().strftime('%d %b %Y')}"
 
     for d in data_list:
         slide = prs.slides.add_slide(prs.slide_layouts[1])
-        slide.shapes.title.text = f"{d['name']} - {d['sector']}"
+        slide.shapes.title.text = f"{d['name']} ({d['sector']})"
         body = slide.placeholders[1].text_frame
         
-        # Summary Section
         p1 = body.paragraphs[0]
-        p1.text = f"Current Movement: {d['change']}%"
+        p1.text = f"Performance: {d['change']}%"
         p1.font.bold = True
         
-        # Detailed Summary (No links)
         p2 = body.add_paragraph()
-        p2.text = f"\nMarket Context:\n{d['headline']}"
+        p2.text = f"\nMarket Context: {d['headline']}"
         p2.font.size = Pt(12)
 
         p3 = body.add_paragraph()
-        p3.text = f"\nDeep-Dive Analysis:\n{d['summary']}"
+        p3.text = f"\nGrowth Forecast:\n{d['analysis']}"
         p3.font.size = Pt(14)
 
     prs.save(filepath)
-    print(f"✅ File saved to: {filepath}")
+    print(f"✅ Saved to {filepath}")
 
 def run_analysis():
-    # ... (Universe fetching logic remains same) ...
-    # Assume final_data is collected here
+    df = get_stock_universe()
+    # FIX: Initialize final_data at the very start to avoid NameError
+    final_data = [] 
     
+    if df.empty: 
+        print("Universe is empty, stopping.")
+        return
+
+    stock_map = {row['Symbol']: row['Company Name'] for _, row in df.iterrows()}
+    sector_map = {row['Symbol']: row.get('Industry', 'General') for _, row in df.iterrows()}
+
+    feed = feedparser.parse("https://news.google.com/rss/search?q=Indian+stock+market+news&hl=en-IN&gl=IN&ceid=IN:en")
+    seen = set()
+
+    for entry in feed.entries[:100]:
+        if len(final_data) >= 15: break
+        headline = entry.title
+        for sym, name in stock_map.items():
+            if sym in headline or name.split()[0] in headline:
+                ticker = f"{sym}.NS"
+                if ticker not in seen:
+                    try:
+                        s = yf.Ticker(ticker).history(period="2d")
+                        if len(s) < 2: continue
+                        change = round(((s['Close'].iloc[-1]-s['Close'].iloc[-2])/s['Close'].iloc[-2])*100, 2)
+                        
+                        final_data.append({
+                            "name": name, 
+                            "sector": sector_map[sym], 
+                            "headline": headline,
+                            "change": change,
+                            "analysis": get_detailed_analysis(sector_map[sym], change)
+                        })
+                        seen.add(ticker)
+                        break
+                    except: continue
+
     if final_data:
         date_str = datetime.now().strftime('%d_%b_%Y')
         filename = f"Analysis_{date_str}.pptx"
         create_ppt(final_data, filename)
+    else:
+        print("No matching news found for today.")
 
 if __name__ == "__main__":
     run_analysis()
